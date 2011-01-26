@@ -182,17 +182,17 @@ static void __wpad_setfmt(s32 chan)
 		case WPAD_FMT_BTNS:
 			wiiuse_set_flags(__wpads[chan], 0, WIIUSE_CONTINUOUS);
 			wiiuse_motion_sensing(__wpads[chan],0);
-			wiiuse_set_ir(__wpads[chan],0);
+			if(chan != WPAD_BALANCE_BOARD) wiiuse_set_ir(__wpads[chan],0);
 			break;
 		case WPAD_FMT_BTNS_ACC:
 			wiiuse_set_flags(__wpads[chan], WIIUSE_CONTINUOUS, 0);
 			wiiuse_motion_sensing(__wpads[chan],1);
-			wiiuse_set_ir(__wpads[chan],0);
+			if(chan != WPAD_BALANCE_BOARD) wiiuse_set_ir(__wpads[chan],0);
 			break;
 		case WPAD_FMT_BTNS_ACC_IR:
 			wiiuse_set_flags(__wpads[chan], WIIUSE_CONTINUOUS, 0);
 			wiiuse_motion_sensing(__wpads[chan],1);
-			wiiuse_set_ir(__wpads[chan],1);
+			if(chan != WPAD_BALANCE_BOARD) wiiuse_set_ir(__wpads[chan],1);
 			break;
 		default:
 			break;
@@ -559,7 +559,6 @@ static void __wpad_read_wiimote(struct wiimote_t *wm, WPADData *data, s32 *idle_
 		data->err = WPAD_ERR_NO_CONTROLLER;
 }
 
-
 static void __wpad_eventCB(struct wiimote_t *wm,s32 event)
 {
 	s32 chan;
@@ -676,26 +675,35 @@ s32 WPAD_Init()
 			__wpdcb[i].thresh.wb = WPAD_THRESH_DEFAULT_BALANCEBOARD;
 			__wpdcb[i].thresh.mp = WPAD_THRESH_DEFAULT_MOTION_PLUS;
 
-			SYS_CreateAlarm(&__wpdcb[i].sound_alarm);
+			if (SYS_CreateAlarm(&__wpdcb[i].sound_alarm) < 0)
+			{
+				WPAD_Shutdown();
+				_CPU_ISR_Restore(level);
+				return WPAD_ERR_UNKNOWN;
+			}
 		}
 
 		if(CONF_GetPadDevices(&__wpad_devs) < 0) {
+			WPAD_Shutdown();
 			_CPU_ISR_Restore(level);
 			return WPAD_ERR_BADCONF;
 		}
 
 		if(__wpad_devs.num_registered == 0) {
+			WPAD_Shutdown();
 			_CPU_ISR_Restore(level);
 			return WPAD_ERR_NONEREGISTERED;
 		}
 
 		if(__wpad_devs.num_registered > CONF_PAD_MAX_REGISTERED) {
+			WPAD_Shutdown();
 			_CPU_ISR_Restore(level);
 			return WPAD_ERR_BADCONF;
 		}
 
 		__wpads = wiiuse_init(WPAD_MAX_WIIMOTES,__wpad_eventCB);
 		if(__wpads==NULL) {
+			WPAD_Shutdown();
 			_CPU_ISR_Restore(level);
 			return WPAD_ERR_UNKNOWN;
 		}
@@ -706,13 +714,18 @@ s32 WPAD_Init()
 		BTE_SetDisconnectCallback(__wpad_disconnectCB);
 		BTE_InitCore(__initcore_finished);
 
-		SYS_CreateAlarm(&__wpad_timer);
+		if (SYS_CreateAlarm(&__wpad_timer) < 0)
+		{
+			WPAD_Shutdown();
+			_CPU_ISR_Restore(level);
+			return WPAD_ERR_UNKNOWN;
+		}
+
 		SYS_RegisterResetFunc(&__wpad_resetinfo);
 
 		tb.tv_sec = 1;
 		tb.tv_nsec = 0;
 		SYS_SetPeriodicAlarm(__wpad_timer,&tb,&tb,__wpad_timeouthandler,NULL);
-
 		__wpads_inited = WPAD_STATE_ENABLING;
 	}
 	_CPU_ISR_Restore(level);
@@ -1072,7 +1085,7 @@ void WPAD_SetBatteryDeadCallback(WPADShutdownCallback cb)
 
 s32 WPAD_Disconnect(s32 chan)
 {
-	u32 level;
+	u32 level, cnt = 0;
 	struct _wpad_cb *wpdcb = NULL;
 
 	if(chan<WPAD_CHAN_0 || chan>=WPAD_MAX_WIIMOTES) return WPAD_ERR_BAD_CHANNEL;
@@ -1085,9 +1098,14 @@ s32 WPAD_Disconnect(s32 chan)
 
 	wpdcb = &__wpdcb[chan];
 	__wpad_disconnect(wpdcb);
+
 	_CPU_ISR_Restore(level);
 
-	while(__wpads_active&(0x01<<chan));
+	while(__wpads_active&(0x01<<chan)) {
+		usleep(50);
+		if(++cnt > 3000) break;
+	}
+
 	return WPAD_ERR_NONE;
 }
 
@@ -1095,14 +1113,12 @@ void WPAD_Shutdown()
 {
 	s32 i;
 	u32 level;
+	u32 cnt = 0;
 	struct _wpad_cb *wpdcb = NULL;
 
 	_CPU_ISR_Disable(level);
-	if(__wpads_inited==WPAD_STATE_DISABLED) {
-		_CPU_ISR_Restore(level);
-		return;
-	}
 
+	__wpads_inited = WPAD_STATE_DISABLED;
 	SYS_RemoveAlarm(__wpad_timer);
 	for(i=0;i<WPAD_MAX_WIIMOTES;i++) {
 		wpdcb = &__wpdcb[i];
@@ -1111,11 +1127,12 @@ void WPAD_Shutdown()
 	}
 
 	__wiiuse_sensorbar_enable(0);
-	__wpads_inited = WPAD_STATE_DISABLED;
 	_CPU_ISR_Restore(level);
 
-	while(__wpads_active)
+	while(__wpads_active) {
 		usleep(50);
+		if(++cnt > 3000) break;
+	}
 
 	BTE_Shutdown();
 }

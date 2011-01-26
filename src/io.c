@@ -95,6 +95,7 @@ void wiiuse_handshake_expansion(struct wiimote_t *wm,ubyte *data,uword len)
 				case EXP_ID_CODE_CLASSIC_CONTROLLER:
 				case EXP_ID_CODE_CLASSIC_CONTROLLER_NYKOWING:
 				case EXP_ID_CODE_CLASSIC_CONTROLLER_NYKOWING2:
+				case EXP_ID_CODE_CLASSIC_CONTROLLER_NYKOWING3:
 				case EXP_ID_CODE_CLASSIC_CONTROLLER_GENERIC:
 				case EXP_ID_CODE_CLASSIC_CONTROLLER_GENERIC2:
 				case EXP_ID_CODE_CLASSIC_CONTROLLER_GENERIC3:
@@ -109,11 +110,12 @@ void wiiuse_handshake_expansion(struct wiimote_t *wm,ubyte *data,uword len)
  					if(!wii_board_handshake(wm,&wm->exp.wb,data,len)) return;
  					break;
 				default:
-					WIIMOTE_DISABLE_STATE(wm,WIIMOTE_STATE_EXP_HANDSHAKE);
+					if(!classic_ctrl_handshake(wm,&wm->exp.classic,data,len)) return;
+					/*WIIMOTE_DISABLE_STATE(wm,WIIMOTE_STATE_EXP_HANDSHAKE);
 					WIIMOTE_ENABLE_STATE(wm,WIIMOTE_STATE_EXP_FAILED);
 					__lwp_wkspace_free(data);
 					wiiuse_status(wm,NULL);
-					return;
+					return;*/
 			}
 			__lwp_wkspace_free(data);
 
